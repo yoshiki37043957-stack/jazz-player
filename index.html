@@ -220,6 +220,7 @@ body.drag #viewer{outline:3px dashed var(--accent);outline-offset:-8px}
 
   <div id="bar">
     <button id="play" title="再生／一時停止">▶</button>
+    <input id="fromBar" type="number" inputmode="numeric" min="1" placeholder="開始小節" title="この小節から始めます（空欄なら最初から）" disabled>
     <button id="stop" title="停止して最初に戻る" style="display:none">■</button>
     <div id="bpmBox">
       <button id="bpmDn">−</button>
@@ -230,7 +231,6 @@ body.drag #viewer{outline:3px dashed var(--accent);outline-offset:-8px}
     <input id="bpmRange" type="range" min="30" max="320" value="140">
     <button id="tap">TAP</button>
     <button id="acc" title="楽譜のコード進行どおりにベースとコードを鳴らします" disabled>♪伴奏</button>
-    <input id="fromBar" type="number" inputmode="numeric" min="1" placeholder="開始小節" title="この小節から始めます（空欄なら最初から）" disabled>
     <select id="meter" title="拍子"></select>
     <select id="style" title="リズム"></select>
     <div id="dots"></div>
