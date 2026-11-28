@@ -84,6 +84,9 @@ body.night #sheet canvas{filter:invert(.92) hue-rotate(180deg)}
 #now small{display:block;color:var(--dim);font-size:11px}
 button:disabled{opacity:.45;cursor:default}
 #acc{height:38px;flex:none}
+#fromBar{width:86px;height:38px;text-align:center;flex:none;-moz-appearance:textfield}
+#fromBar::-webkit-inner-spin-button{display:none}
+#fromBar.bad{border-color:#e0584a;color:#e0584a}
 /* リズムバー */
 #bar{background:var(--panel);border-top:1px solid var(--line);padding:8px 10px;display:flex;align-items:center;gap:8px;padding-bottom:max(8px,env(safe-area-inset-bottom))}
 #play{width:48px;height:48px;border-radius:50%;font-size:19px;background:var(--accent);color:#1a1206;border:0;flex:none;padding:0}
@@ -227,6 +230,7 @@ body.drag #viewer{outline:3px dashed var(--accent);outline-offset:-8px}
     <input id="bpmRange" type="range" min="30" max="320" value="140">
     <button id="tap">TAP</button>
     <button id="acc" title="楽譜のコード進行どおりにベースとコードを鳴らします" disabled>♪伴奏</button>
+    <input id="fromBar" type="number" inputmode="numeric" min="1" placeholder="開始小節" title="この小節から始めます（空欄なら最初から）" disabled>
     <select id="meter" title="拍子"></select>
     <select id="style" title="リズム"></select>
     <div id="dots"></div>
@@ -781,7 +785,7 @@ function pulse(t){
     INS.click(t,beat===0?1:.6);flash(t,beat);
     countLeft--;beat=(beat+1)%m.n;if(countLeft===0){beat=0;barN=0;}return;
   }
-  if(!st.ev){
+  if(!st.ev||ncNow()){
     INS.click(t,beat===0?1:(m.mid&&m.mid.includes(beat))?.7:.5);
     if(!m.pulse)for(let i=1;i<S.subdiv;i++)INS.click(t+d*i/S.subdiv,.22);
   }else{
@@ -803,7 +807,7 @@ function tick(){if(nextT<ac.currentTime-.3)nextT=ac.currentTime+.05;while(nextT<
 let paused=false;
 function startPlay(resume){
   ensureAudio();
-  if(!resume){seqI=0;chorus=1;barN=0;}
+  if(!resume){seqI=0;chorus=1;barN=0;if(typeof barIndex==='function'){const bi=barIndex();if(bi>=0)seqI=bi;}}
   else if(chart&&seqI>0)seqI=Math.floor((seqI-1)/chart.n)*chart.n; // 止めた小節の頭から再開
   paused=false;busOn();beat=0;countLeft=S.countIn*METERS[M.meter].n;
   nextT=ac.currentTime+.1;timer=setInterval(tick,25);
@@ -894,7 +898,7 @@ function chordFromText(txt){
 function parseChart(text){
   const doc=new DOMParser().parseFromString(text,'application/xml'),part=doc.querySelector('part');if(!part)return null;
   const num=(e,q)=>{const x=e.querySelector(q);return x?+x.textContent:0;};
-  let div=1,beats=4,btype=4,end=null;const ms=[];
+  let div=1,beats=4,btype=4,end=null,lastCh=null;const ms=[];
   for(const m of part.children){
     if(m.tagName!=='measure')continue;
     const o={no:m.getAttribute('number'),h:[],fwd:false,back:false,end,reh:null,stop:false};let pos=0;
@@ -911,8 +915,13 @@ function parseChart(text){
             for(const dg of c.querySelectorAll('degree')){const a=num(dg,'degree-alter');q+='('+(a<0?'b':a>0?'#':'')+num(dg,'degree-value')+')';}}
           const bs=c.querySelector('bass-step');
           ch=mkChord((PC[rs.textContent.trim()]+Math.round(num(c,'root-alter'))+12)%12,q,bs?(PC[bs.textContent.trim()]+Math.round(num(c,'bass-alter'))+12)%12:null);
-        }else{const f=c.querySelector('function');if(f)ch=chordFromText(f.textContent);}
-        if(ch)o.h.push({at,ch}); // 読み取れない記号は無視して前のコードを続ける
+        }else{
+          const f=c.querySelector('function'),ft=f?f.textContent.trim():'';
+          if(/^(N\.?\s*C\.?|NO\s*CHORDS?)$/i.test(ft)){o.h.push({at,ch:null,nc:true});lastCh=null;continue;} // コードなし：クリックだけにする
+          if(/^\/[A-G]/.test(ft)&&lastCh)ch=Object.assign({},lastCh,{bass:keyPc(ft.slice(1))});           // 「/B♭」＝前のコードのままベースだけ変える
+          else if(ft)ch=chordFromText(ft);
+        }
+        if(ch){o.h.push({at,ch});lastCh=ch;} // 「/」「%」など読み取れない記号は無視して前のコードを続ける
       }else if(tg==='note'){if(!c.querySelector('chord')&&!c.querySelector('grace'))pos+=num(c,'duration');}
       else if(tg==='backup')pos-=num(c,'duration');
       else if(tg==='forward')pos+=num(c,'duration');
@@ -939,13 +948,13 @@ function parseChart(text){
     i++;
   }
   // 1拍ごとのコード列にする（イントロは2コーラス目以降くり返さない）
-  const seq=[];let curCh=null,loopStart=0,inIntro=/intro/i.test((ms[0]&&ms[0].reh)||'');
+  const seq=[];let curCh=null,curNc=false,loopStart=0,inIntro=/intro/i.test((ms[0]&&ms[0].reh)||'');
   for(const idx of order){
     const m=ms[idx];
     if(inIntro&&m.reh&&!/intro/i.test(m.reh)){inIntro=false;loopStart=seq.length;}
     for(let b=0;b<beats;b++){
-      let chg=false;for(const h of m.h)if(Math.floor(h.at+1e-6)===b){curCh=h.ch;chg=true;}
-      seq.push({ch:curCh,chg,no:m.no,b});
+      let chg=false;for(const h of m.h)if(Math.floor(h.at+1e-6)===b){curCh=h.ch;curNc=!!h.nc;chg=true;}
+      seq.push({ch:curCh,chg,no:m.no,b,nc:curNc});
     }
   }
   return{n:beats,meter:beats+'/'+btype,seq,loopStart:inIntro?0:loopStart};
@@ -956,7 +965,8 @@ async function chartText(s){
   return buf?new TextDecoder('utf-8').decode(buf):null;
 }
 async function prepareChart(){
-  const s=cur&&cur.song;chart=null;updAcc();if(!timer){paused=false;$('#now').style.display='none';$('#stop').style.display='none';}if(!s)return;
+  const s=cur&&cur.song;if(!s||!chart||charts.get(s.name)!==chart){$('#fromBar').value='';$('#fromBar').classList.remove('bad');}
+  chart=null;updAcc();if(!timer){paused=false;$('#now').style.display='none';$('#stop').style.display='none';}if(!s)return;
   if(!charts.has(s.name)){
     let c=null;try{const t=await chartText(s);if(t)c=parseChart(t);}catch(e){}
     charts.set(s.name,c&&c.seq.some(x=>x.ch)?c:null);
@@ -969,7 +979,7 @@ async function prepareChart(){
   updAcc();
 }
 function updAcc(){
-  const b=$('#acc');b.disabled=!chart;b.classList.toggle('on',!!(chart&&S.acc));
+  const b=$('#acc');b.disabled=!chart;$('#fromBar').disabled=!chart;b.classList.toggle('on',!!(chart&&S.acc));
   b.textContent=chart?'♪伴奏':'伴奏なし';
 }
 $('#acc').onclick=()=>{S.acc=!S.acc;saveLocal();updAcc();if(!S.acc)$('#now').style.display='none';};
@@ -1017,6 +1027,21 @@ const ACC={
   funk:{comp:[1,2.5],cdur:.25,bass:[[0,'r'],[1.5,'r'],[2.5,'f']],bdur:.5},
   waltz:{comp:[1,2],cdur:.4,bass:[[0,'r']],bdur:2.5,noChg:true},
   five:{comp:[1,2,4],cdur:.4,bass:[[0,'r'],[3,'f']],bdur:1.8,noChg:true}
+};
+function ncNow(){ // いまの拍が「コードなし」の区間か
+  if(!chart||!S.acc||!cur||chart.n!==METERS[M.meter].n)return false;
+  const e=chart.seq[seqI>=chart.seq.length?chart.loopStart:seqI];return!!(e&&e.nc);
+}
+function barIndex(){ // 「開始小節」に入れた番号の位置（なければ -1）
+  const v=parseInt($('#fromBar').value);if(!chart||!(v>0))return-1;
+  return chart.seq.findIndex(e=>e.b===0&&parseInt(e.no)===v);
+}
+$('#fromBar').oninput=()=>{
+  const inp=$('#fromBar'),bi=barIndex(),empty=inp.value.trim()==='';
+  inp.classList.toggle('bad',!empty&&bi<0);
+  if(bi<0)return;
+  if(timer){seqI=bi;beat=0;}                       // 再生中：すぐその小節へ
+  else if(paused){paused=false;seqI=0;$('#now').style.display='none';$('#stop').style.display='none';} // 一時停止中：次の再生をその小節から
 };
 function accomp(t,d){
   if(!chart||!S.acc||!cur||chart.n!==METERS[M.meter].n)return;

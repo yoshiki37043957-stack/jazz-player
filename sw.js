@@ -1,5 +1,5 @@
 // 黒本プレイヤー：アプリ本体を端末に保存してオフラインで動かす
-const CACHE='kurohon-app-202611210856';
+const CACHE='kurohon-app-202611281513';
 const FILES=["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png", "lib/pdf.min.js", "lib/pdf.worker.min.js", "lib/wasm/jbig2.wasm", "lib/wasm/jbig2_nowasm_fallback.js", "lib/wasm/openjpeg.wasm", "lib/wasm/openjpeg_nowasm_fallback.js", "lib/wasm/qcms_bg.wasm"];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES)).then(()=>self.skipWaiting()));});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k.startsWith('kurohon-app-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});
